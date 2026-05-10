@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.claude-code-limits"
+          path="/org/gnome/shell/extensions/claude-code-limits/">
+    <key name="five-hour-token-limit" type="x">
+      <default>200000000</default>
+      <summary>5-hour token budget</summary>
+      <description>
+        Maximum tokens for the 5-hour billing block. The token count is the
+        ccusage totalTokens (input + output + cache creation + cache read).
+      </description>
+    </key>
+    <key name="weekly-token-limit" type="x">
+      <default>2000000000</default>
+      <summary>Weekly token budget</summary>
+      <description>
+        Maximum tokens for the rolling 7-day window.
+      </description>
+    </key>
+    <key name="refresh-seconds" type="u">
+      <default>60</default>
+      <range min="10" max="3600"/>
+      <summary>Refresh interval (seconds)</summary>
+    </key>
+    <key name="warning-percent" type="u">
+      <default>70</default>
+      <range min="1" max="99"/>
+      <summary>Warning threshold (%)</summary>
+      <description>Progress bar turns orange when usage exceeds this percent.</description>
+    </key>
+    <key name="danger-percent" type="u">
+      <default>90</default>
+      <range min="1" max="100"/>
+      <summary>Danger threshold (%)</summary>
+      <description>Progress bar turns red when usage exceeds this percent.</description>
+    </key>
+  </schema>
+</schemalist>

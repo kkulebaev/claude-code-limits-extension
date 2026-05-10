@@ -1,0 +1,10 @@
+{
+  "uuid": "claude-code-limits@kkulebaev",
+  "name": "Claude Code Limits",
+  "description": "Показывает текущее использование Claude Code: 5-часовое billing-окно и rolling 7 дней. Источник — ccusage (парсит ~/.claude/projects). Это аппроксимация активности, а не реальные проценты лимита Anthropic.",
+  "shell-version": ["45", "46", "47", "48", "49"],
+  "url": "https://github.com/kkulebaev/claude-code-limits-extension",
+  "settings-schema": "org.gnome.shell.extensions.claude-code-limits",
+  "version": 2,
+  "version-name": "0.2.0"
+}

@@ -1,0 +1,85 @@
+.cc-panel-button {
+  -natural-hpadding: 12px;
+  -minimum-hpadding: 12px;
+}
+
+.cc-panel-box {
+  spacing: 6px;
+}
+
+.cc-panel-content {
+  spacing: 5px;
+}
+
+.cc-panel-mini-bar {
+  min-width: 40px;
+  min-height: 6px;
+}
+
+.cc-panel-label {
+  font-feature-settings: "tnum";
+  font-weight: 500;
+}
+
+.cc-panel-icon {
+  icon-size: 16px;
+}
+
+.cc-panel-label-warning {
+  color: #f5a623;
+}
+
+.cc-panel-label-danger {
+  color: #f04040;
+}
+
+.cc-popup-row {
+  padding: 2px 12px;
+}
+
+.cc-popup-row-label {
+  color: #a0a0a0;
+  min-width: 140px;
+}
+
+.cc-popup-row-value {
+  font-feature-settings: "tnum";
+}
+
+.cc-popup-error {
+  color: #f08080;
+  font-style: italic;
+}
+
+.cc-progress-row {
+  padding: 6px 12px 2px 12px;
+}
+
+.cc-progress-track {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  height: 8px;
+  min-height: 8px;
+}
+
+.cc-progress-fill {
+  background-color: #4caf50;
+  border-radius: 4px;
+  height: 8px;
+  min-height: 8px;
+}
+
+.cc-progress-fill-warning {
+  background-color: #f5a623;
+}
+
+.cc-progress-fill-danger {
+  background-color: #f04040;
+}
+
+.cc-progress-caption {
+  padding: 2px 12px 6px 12px;
+  color: #a0a0a0;
+  font-feature-settings: "tnum";
+  font-size: 0.9em;
+}
