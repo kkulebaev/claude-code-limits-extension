@@ -14,9 +14,8 @@
 ## Требования
 
 - GNOME Shell 45+ (тестировалось на 49.6, Fedora 43)
-- Node.js или Bun (для запуска `ccusage` через `npx`/`bunx`)
-- Желательно: глобально установленный `ccusage` — иначе каждый запуск через
-  `npx -y ccusage@latest` будет тянуть пакет из npm-кэша.
+- Глобально установленный `ccusage` (плагин запускает абсолютный путь к
+  бинарнику; on-demand fallback не реализован).
 
 ```sh
 pnpm add -g ccusage   # или: npm i -g ccusage / bun add -g ccusage
@@ -53,7 +52,7 @@ journalctl -f -o cat /usr/bin/gnome-shell
 Проверить, какую команду найдёт extension:
 
 ```sh
-ccusage --version || bunx ccusage --version || npx -y ccusage@latest --version
+ccusage --version
 ```
 
 ## Структура
@@ -61,6 +60,8 @@ ccusage --version || bunx ccusage --version || npx -y ccusage@latest --version
 ```
 metadata.json       # манифест extension'а (UUID, поддерживаемые версии shell)
 extension.js        # PanelMenu.Button + Gio.Subprocess к ccusage
+prefs.js            # окно настроек (Adw.PreferencesPage)
 stylesheet.css      # стили лейбла, popup-строк
+schemas/            # GSettings-схема (org.gnome.shell.extensions.claude-code-limits)
 install.sh          # копирует файлы в ~/.local/share/gnome-shell/extensions
 ```

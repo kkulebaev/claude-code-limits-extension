@@ -85,7 +85,7 @@ export default class ClaudeCodeLimitsPreferences extends ExtensionPreferences {
       }),
     })
     row.value = Math.round(Number(settings.get_int64(key)) / 1_000_000)
-    row.connect('changed', () => {
+    row.connect('notify::value', () => {
       const tokens = Math.round(row.value * 1_000_000)
       if (settings.get_int64(key) !== tokens) {
         settings.set_int64(key, tokens)

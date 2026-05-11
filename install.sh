@@ -6,6 +6,7 @@ SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST_DIR="${HOME}/.local/share/gnome-shell/extensions/${UUID}"
 
 echo "Installing extension to: ${DEST_DIR}"
+gnome-extensions disable "${UUID}" 2>/dev/null || true
 mkdir -p "${DEST_DIR}/schemas"
 
 cp -f "${SRC_DIR}/metadata.json"   "${DEST_DIR}/metadata.json"
@@ -16,6 +17,7 @@ cp -f "${SRC_DIR}/schemas/"*.gschema.xml "${DEST_DIR}/schemas/"
 
 echo "Compiling GSettings schemas..."
 glib-compile-schemas "${DEST_DIR}/schemas/"
+gnome-extensions enable "${UUID}" 2>/dev/null || true
 
 echo
 echo "Done. Next steps:"

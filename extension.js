@@ -34,8 +34,9 @@ function logError(msg) {
 
 function formatTokens(n) {
   if (n == null || Number.isNaN(n)) return '—'
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 999_500_000_000) return `${(n / 1_000_000_000_000).toFixed(1)}T`
+  if (n >= 999_500_000) return `${(n / 1_000_000_000).toFixed(1)}B`
+  if (n >= 999_500) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return String(Math.round(n))
 }
@@ -292,18 +293,23 @@ const Indicator = GObject.registerClass(
 
     _sinceDate() {
       const dt = GLib.DateTime.new_now_local().add_days(-6)
+      // ccusage --since accepts YYYYMMDD format
       return dt.format('%Y%m%d')
     }
 
     _resolveCmd() {
       if (!this._ccusagePath) {
-        const found = CCUSAGE_CANDIDATES
+        let found = CCUSAGE_CANDIDATES
           .map(fn => fn())
           .find(p => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE))
+        if (!found) {
+          found = GLib.find_program_in_path('ccusage')
+        }
         if (!found) {
           throw new Error('ccusage не найден на диске. Установите: pnpm add -g ccusage')
         }
         this._ccusagePath = found
+        console.debug(`[claude-code-limits] resolved ccusage: ${this._ccusagePath}`)
       }
       if (!this._extraPath) {
         const dirs = NODE_DIR_CANDIDATES
