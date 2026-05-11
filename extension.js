@@ -264,8 +264,9 @@ const Indicator = GObject.registerClass(
     }
 
     _refresh() {
+      const cancellable = new Gio.Cancellable()
       if (this._cancellable) this._cancellable.cancel()
-      this._cancellable = new Gio.Cancellable()
+      this._cancellable = cancellable
 
       try {
         this._resolveCmd()
@@ -276,18 +277,28 @@ const Indicator = GObject.registerClass(
       }
 
       Promise.all([
-        this._exec([this._ccusagePath, 'blocks', '--active', '--json']),
-        this._exec([this._ccusagePath, 'daily', '--since', this._sinceDate(), '--json']),
+        this._exec([this._ccusagePath, 'blocks', '--active', '--json'], cancellable),
+        this._exec([this._ccusagePath, 'daily', '--since', this._sinceDate(), '--json'], cancellable),
       ])
         .then(([blocksOut, dailyOut]) => {
-          this._lastData = {
-            blocks: JSON.parse(blocksOut),
-            daily: JSON.parse(dailyOut),
+          if (cancellable.is_cancelled()) return
+          let parsed
+          try {
+            parsed = {
+              blocks: JSON.parse(blocksOut),
+              daily: JSON.parse(dailyOut),
+            }
+          } catch (e) {
+            logError(e.message)
+            this._renderError(`parse error: ${e.message}`)
+            return
           }
+          this._lastData = parsed
           this._reRender()
         })
         .catch(err => {
-          if (err && err.code === Gio.IOErrorEnum.CANCELLED) return
+          if (cancellable.is_cancelled()) return
+          if (err instanceof GLib.Error && err.matches(Gio.io_error_quark(), Gio.IOErrorEnum.CANCELLED)) return
           const msg = err?.message ?? String(err)
           logError(msg)
           this._renderError(msg)
@@ -319,7 +330,7 @@ const Indicator = GObject.registerClass(
       }
     }
 
-    _exec(argv) {
+    _exec(argv, cancellable) {
       return new Promise((resolve, reject) => {
         try {
           const launcher = new Gio.SubprocessLauncher({
@@ -329,7 +340,7 @@ const Indicator = GObject.registerClass(
           launcher.setenv('HOME', GLib.get_home_dir(), true)
           launcher.setenv('NO_COLOR', '1', true)
           const proc = launcher.spawnv(argv)
-          proc.communicate_utf8_async(null, this._cancellable, (p, res) => {
+          proc.communicate_utf8_async(null, cancellable, (p, res) => {
             try {
               const [, stdout, stderr] = p.communicate_utf8_finish(res)
               if (p.get_successful()) {
@@ -349,6 +360,7 @@ const Indicator = GObject.registerClass(
     }
 
     _reRender() {
+      if (this._cancellable && this._cancellable.is_cancelled()) return
       if (!this._lastData) return
       this._render(this._lastData.blocks, this._lastData.daily)
     }

@@ -7,6 +7,7 @@ import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/
 export default class ClaudeCodeLimitsPreferences extends ExtensionPreferences {
   fillPreferencesWindow(window) {
     const settings = this.getSettings()
+    const settingsHandlerIds = []
 
     const page = new Adw.PreferencesPage({ title: 'General', icon_name: 'preferences-system-symbolic' })
     window.add(page)
@@ -20,18 +21,23 @@ export default class ClaudeCodeLimitsPreferences extends ExtensionPreferences {
     })
     page.add(budgets)
 
-    budgets.add(this._buildTokenRow(
+    const fivehRow = this._buildTokenRow(
       settings,
       'five-hour-token-limit',
       '5-hour limit',
       'Million tokens (default: 200)',
-    ))
-    budgets.add(this._buildTokenRow(
+    )
+    settingsHandlerIds.push(fivehRow.settingsHandlerId)
+    budgets.add(fivehRow.row)
+
+    const weekRow = this._buildTokenRow(
       settings,
       'weekly-token-limit',
       'Weekly limit (rolling 7 days)',
       'Million tokens (default: 2000)',
-    ))
+    )
+    settingsHandlerIds.push(weekRow.settingsHandlerId)
+    budgets.add(weekRow.row)
 
     const indicators = new Adw.PreferencesGroup({ title: 'Indicators' })
     page.add(indicators)
@@ -59,6 +65,12 @@ export default class ClaudeCodeLimitsPreferences extends ExtensionPreferences {
     })
     settings.bind('refresh-seconds', refreshRow, 'value', Gio.SettingsBindFlags.DEFAULT)
     indicators.add(refreshRow)
+
+    window.connect('close-request', () => {
+      for (const id of settingsHandlerIds) settings.disconnect(id)
+      settingsHandlerIds.length = 0
+      return false
+    })
   }
 
   _buildTokenRow(settings, key, title, subtitle) {
@@ -79,10 +91,10 @@ export default class ClaudeCodeLimitsPreferences extends ExtensionPreferences {
         settings.set_int64(key, tokens)
       }
     })
-    settings.connect(`changed::${key}`, () => {
+    const settingsHandlerId = settings.connect(`changed::${key}`, () => {
       const v = Math.round(Number(settings.get_int64(key)) / 1_000_000)
       if (row.value !== v) row.value = v
     })
-    return row
+    return { row, settingsHandlerId }
   }
 }
