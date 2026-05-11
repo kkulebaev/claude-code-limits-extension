@@ -1,0 +1,15 @@
+# Build artifacts
+schemas/gschemas.compiled
+
+# OMC tooling state
+.omc/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
