@@ -7,7 +7,7 @@ import Clutter from 'gi://Clutter'
 import * as Main from 'resource:///org/gnome/shell/ui/main.js'
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js'
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js'
-import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js'
+import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js'
 
 function homePath(rel) {
   return GLib.build_filenamev([GLib.get_home_dir(), rel])
@@ -153,12 +153,12 @@ const Indicator = GObject.registerClass(
     }
 
     _buildMenu() {
-      this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem(_('5-hour billing block')))
+      this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('5-hour billing block'))
       this._fivehBar = this._addProgressRow()
       this._fivehCaption = this._addCaptionRow()
-      this._fivehResets = this._addRow(_('Resets'))
+      this._fivehResets = this._addRow('Resets')
 
-      this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem(_('Last 7 days')))
+      this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Last 7 days'))
       this._weekBar = this._addProgressRow()
       this._weekCaption = this._addCaptionRow()
 
@@ -169,11 +169,11 @@ const Indicator = GObject.registerClass(
       this._errorRow.visible = false
       this.menu.addMenuItem(this._errorRow)
 
-      const refresh = new PopupMenu.PopupMenuItem(_('Refresh now'))
+      const refresh = new PopupMenu.PopupMenuItem('Refresh now')
       refresh.connect('activate', () => this._refresh())
       this.menu.addMenuItem(refresh)
 
-      const prefs = new PopupMenu.PopupMenuItem(_('Preferences…'))
+      const prefs = new PopupMenu.PopupMenuItem('Preferences…')
       prefs.connect('activate', () => this._extension.openPreferences())
       this.menu.addMenuItem(prefs)
     }
