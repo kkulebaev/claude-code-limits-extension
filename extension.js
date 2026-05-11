@@ -150,6 +150,7 @@ const Indicator = GObject.registerClass(
         this._settings.connect('changed::weekly-token-limit', () => this._reRender()),
         this._settings.connect('changed::warning-percent', () => this._reRender()),
         this._settings.connect('changed::danger-percent', () => this._reRender()),
+        this._settings.connect('changed::count-cache-reads', () => this._reRender()),
       ]
     }
 
@@ -158,6 +159,10 @@ const Indicator = GObject.registerClass(
       this._fivehBar = this._addProgressRow()
       this._fivehCaption = this._addCaptionRow()
       this._fivehResets = this._addRow('Resets')
+      this._fivehTokensIn = this._addRow('Input')
+      this._fivehTokensOut = this._addRow('Output')
+      this._fivehTokensCc = this._addRow('Cache create')
+      this._fivehTokensCr = this._addRow('Cache read')
 
       this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Last 7 days'))
       this._weekBar = this._addProgressRow()
@@ -356,6 +361,21 @@ const Indicator = GObject.registerClass(
       this._render(this._lastData.blocks, this._lastData.daily)
     }
 
+    formatPct(pct) {
+      return pct > 100 ? '100%+' : `${Math.round(pct)}%`
+    }
+    _blockTokens(block, includeCache) {
+      const tc = block.tokenCounts
+      let n = tc.inputTokens + tc.outputTokens + tc.cacheCreationInputTokens
+      if (includeCache) n += tc.cacheReadInputTokens
+      return n
+    }
+    _dailyTokens(d, includeCache) {
+      let n = d.inputTokens + d.outputTokens + d.cacheCreationTokens
+      if (includeCache) n += d.cacheReadTokens
+      return n
+    }
+
     _render(blocksData, dailyData) {
       this._errorRow.visible = false
 
@@ -363,15 +383,16 @@ const Indicator = GObject.registerClass(
       const weeklyLimit = Math.max(1, Number(this._settings.get_int64('weekly-token-limit')))
       const warnPct = this._settings.get_uint('warning-percent')
       const dangerPct = this._settings.get_uint('danger-percent')
+      const countCacheReads = this._settings.get_boolean('count-cache-reads')
 
       const block = blocksData?.blocks?.find(b => b.isActive && !b.isGap) ?? null
-      const fivehTokens = block ? (block.totalTokens || 0) : 0
+      const fivehTokens = block ? this._blockTokens(block, countCacheReads) : 0
       const fivehPct = (fivehTokens / fivehLimit) * 100
       const fivehState = pickState(fivehPct, warnPct, dangerPct)
 
       this._fivehBar.setProgress(fivehPct, fivehState)
       this._fivehCaption.set_text(
-        `${Math.round(fivehPct)}% · ${formatTokens(fivehTokens)} / ${formatTokens(fivehLimit)}`,
+        `${this.formatPct(fivehPct)} · ${formatTokens(fivehTokens)} / ${formatTokens(fivehLimit)}`,
       )
 
       if (block) {
@@ -387,18 +408,27 @@ const Indicator = GObject.registerClass(
           }
         }
         this._fivehResets.set_text(resets)
+        const tc = block.tokenCounts
+        this._fivehTokensIn.set_text(formatTokens(tc.inputTokens))
+        this._fivehTokensOut.set_text(formatTokens(tc.outputTokens))
+        this._fivehTokensCc.set_text(formatTokens(tc.cacheCreationInputTokens))
+        this._fivehTokensCr.set_text(formatTokens(tc.cacheReadInputTokens))
       } else {
         this._fivehResets.set_text('—')
+        this._fivehTokensIn.set_text('—')
+        this._fivehTokensOut.set_text('—')
+        this._fivehTokensCc.set_text('—')
+        this._fivehTokensCr.set_text('—')
       }
 
       const days = dailyData?.daily ?? []
-      const weeklyTokens = days.reduce((s, d) => s + (d.totalTokens || 0), 0)
+      const weeklyTokens = days.reduce((s, d) => s + this._dailyTokens(d, countCacheReads), 0)
       const weeklyPct = (weeklyTokens / weeklyLimit) * 100
       const weeklyState = pickState(weeklyPct, warnPct, dangerPct)
 
       this._weekBar.setProgress(weeklyPct, weeklyState)
       this._weekCaption.set_text(
-        `${Math.round(weeklyPct)}% · ${formatTokens(weeklyTokens)} / ${formatTokens(weeklyLimit)}`,
+        `${this.formatPct(weeklyPct)} · ${formatTokens(weeklyTokens)} / ${formatTokens(weeklyLimit)}`,
       )
 
       this._panelContent.visible = true
@@ -411,7 +441,7 @@ const Indicator = GObject.registerClass(
     }
 
     _setPctLabel(label, percent, state) {
-      label.set_text(`${Math.round(percent)}%`)
+      label.set_text(this.formatPct(percent))
       label.remove_style_class_name('cc-panel-label-warning')
       label.remove_style_class_name('cc-panel-label-danger')
       if (state === 'warning') label.add_style_class_name('cc-panel-label-warning')

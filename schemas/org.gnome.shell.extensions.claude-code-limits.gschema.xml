@@ -3,18 +3,19 @@
   <schema id="org.gnome.shell.extensions.claude-code-limits"
           path="/org/gnome/shell/extensions/claude-code-limits/">
     <key name="five-hour-token-limit" type="x">
-      <default>200000000</default>
+      <default>40000000</default>
       <summary>5-hour token budget</summary>
       <description>
-        Maximum tokens for the 5-hour billing block. The token count is the
-        ccusage totalTokens (input + output + cache creation + cache read).
+        Maximum tokens for the 5-hour billing block. Tokens = input + output + cache creation,
+        optionally including cache reads (toggle "Count cache reads" in preferences).
       </description>
     </key>
     <key name="weekly-token-limit" type="x">
-      <default>2000000000</default>
+      <default>400000000</default>
       <summary>Weekly token budget</summary>
       <description>
-        Maximum tokens for the rolling 7-day window.
+        Maximum tokens for the last 7 calendar days. Tokens = input + output + cache creation,
+        optionally including cache reads (toggle "Count cache reads" in preferences).
       </description>
     </key>
     <key name="refresh-seconds" type="u">
@@ -33,6 +34,15 @@
       <range min="1" max="100"/>
       <summary>Danger threshold (%)</summary>
       <description>Progress bar turns red when usage exceeds this percent.</description>
+    </key>
+    <key name="count-cache-reads" type="b">
+      <default>false</default>
+      <summary>Count cache-read tokens</summary>
+      <description>
+        If true, cache-read tokens are included in the 5h and weekly budget calculations
+        alongside input, output, and cache-creation tokens. Default off because cache reads
+        typically dominate totalTokens by 5x or more, making default budgets misleading.
+      </description>
     </key>
   </schema>
 </schemalist>

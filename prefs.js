@@ -15,7 +15,7 @@ export default class ClaudeCodeLimitsPreferences extends ExtensionPreferences {
     const budgets = new Adw.PreferencesGroup({
       title: 'Token budgets',
       description:
-        'Tokens = ccusage totalTokens (input + output + cache creation + cache read). ' +
+        'Tokens = input + output + cache creation, optionally including cache reads. ' +
         'These numbers are NOT the same as Anthropic billable tokens — they reflect ' +
         'overall activity. Pick budgets that match your historical usage.',
     })
@@ -33,7 +33,7 @@ export default class ClaudeCodeLimitsPreferences extends ExtensionPreferences {
     const weekRow = this._buildTokenRow(
       settings,
       'weekly-token-limit',
-      'Weekly limit (rolling 7 days)',
+      'Weekly limit (last 7 days)',
       'Million tokens (default: 2000)',
     )
     settingsHandlerIds.push(weekRow.settingsHandlerId)
@@ -41,6 +41,13 @@ export default class ClaudeCodeLimitsPreferences extends ExtensionPreferences {
 
     const indicators = new Adw.PreferencesGroup({ title: 'Indicators' })
     page.add(indicators)
+
+    const cacheRow = new Adw.SwitchRow({
+      title: 'Count cache reads',
+      subtitle: 'Include cache-read tokens in budget totals. Off by default — cache reads typically dominate totalTokens by ~5x.',
+    })
+    settings.bind('count-cache-reads', cacheRow, 'active', Gio.SettingsBindFlags.DEFAULT)
+    indicators.add(cacheRow)
 
     const warningRow = new Adw.SpinRow({
       title: 'Warning threshold',
