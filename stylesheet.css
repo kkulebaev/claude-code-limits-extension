@@ -11,9 +11,25 @@
   spacing: 5px;
 }
 
-.cc-panel-mini-bar {
+.cc-panel-mini-bar-track {
   min-width: 40px;
   min-height: 6px;
+  background-color: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+
+.cc-panel-mini-bar-fill {
+  min-height: 6px;
+  background-color: #ffffff;
+  border-radius: 3px;
+}
+
+.cc-panel-mini-bar-fill.cc-progress-fill-warning {
+  background-color: #f5a623;
+}
+
+.cc-panel-mini-bar-fill.cc-progress-fill-danger {
+  background-color: #f04040;
 }
 
 .cc-panel-label {

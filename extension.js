@@ -46,55 +46,49 @@ function pickState(percent, warnPct, dangerPct) {
   return 'ok'
 }
 
-const ProgressBar = GObject.registerClass(
-  class ProgressBar extends St.DrawingArea {
-    _init(params) {
-      super._init({ height: 8, x_expand: true, ...params })
-      this._percent = 0
-      this._state = 'ok'
-      this.connect('repaint', this._onRepaint.bind(this))
+function makeProgressBar({ height = 8, miniBar = false } = {}) {
+  const trackClass = miniBar ? 'cc-panel-mini-bar-track' : 'cc-progress-track'
+  const fillClass = miniBar ? 'cc-panel-mini-bar-fill' : 'cc-progress-fill'
+  const track = new St.BoxLayout({
+    style_class: trackClass,
+    x_expand: !miniBar,
+    y_align: Clutter.ActorAlign.CENTER,
+    height,
+    ...(miniBar ? { width: 40 } : {}),
+  })
+  const fill = new St.Widget({
+    style_class: fillClass,
+    x_expand: false,
+    y_expand: false,
+    height,
+  })
+  track.add_child(fill)
+
+  let lastPct = 0
+  const recompute = () => {
+    const w = track.get_width()
+    if (w <= 0) return
+    fill.set_width(Math.round((w * lastPct) / 100))
+  }
+
+  const setProgress = (percent, state) => {
+    lastPct = Math.max(0, Math.min(100, percent))
+    fill.remove_style_class_name('cc-progress-fill-warning')
+    fill.remove_style_class_name('cc-progress-fill-danger')
+    if (state === 'warning') fill.add_style_class_name('cc-progress-fill-warning')
+    if (state === 'danger') fill.add_style_class_name('cc-progress-fill-danger')
+    if (lastPct === 0) {
+      fill.hide()
+    } else {
+      fill.show()
+      recompute()
     }
+  }
 
-    setProgress(percent, state) {
-      this._percent = Math.max(0, Math.min(100, percent))
-      this._state = state
-      this.queue_repaint()
-    }
+  const allocId = track.connect('notify::allocation', recompute)
 
-    _onRepaint() {
-      const [w, h] = this.get_surface_size()
-      if (w <= 0 || h <= 0) return
-      const cr = this.get_context()
-      const radius = h / 2
-
-      cr.setSourceRGBA(1, 1, 1, 0.08)
-      this._roundedRect(cr, 0, 0, w, h, radius)
-      cr.fill()
-
-      const fw = (w * this._percent) / 100
-      if (fw > 0) {
-        cr.setSourceRGBA(1, 1, 1, 1)
-        this._roundedRect(cr, 0, 0, fw, h, Math.min(radius, fw / 2))
-        cr.fill()
-      }
-      cr.$dispose()
-    }
-
-    _roundedRect(cr, x, y, w, h, r) {
-      if (r <= 0) {
-        cr.rectangle(x, y, w, h)
-        return
-      }
-      const halfPi = Math.PI / 2
-      cr.newSubPath()
-      cr.arc(x + w - r, y + r, r, -halfPi, 0)
-      cr.arc(x + w - r, y + h - r, r, 0, halfPi)
-      cr.arc(x + r, y + h - r, r, halfPi, Math.PI)
-      cr.arc(x + r, y + r, r, Math.PI, 3 * halfPi)
-      cr.closePath()
-    }
-  },
-)
+  return { track, fill, setProgress, allocId }
+}
 
 const Indicator = GObject.registerClass(
   class ClaudeLimitsIndicator extends PanelMenu.Button {
@@ -113,33 +107,21 @@ const Indicator = GObject.registerClass(
         style_class: 'cc-panel-content',
         y_align: Clutter.ActorAlign.CENTER,
       })
-      this._fivehMiniBar = new ProgressBar({
-        style_class: 'cc-panel-mini-bar',
-        x_expand: false,
-        width: 40,
-        height: 6,
-      })
-      this._fivehMiniBar.y_align = Clutter.ActorAlign.CENTER
+      this._fivehMiniBar = makeProgressBar({ height: 6, miniBar: true })
       this._fivehPctLabel = new St.Label({
         text: '0%',
         style_class: 'cc-panel-label',
         y_align: Clutter.ActorAlign.CENTER,
       })
-      this._weekMiniBar = new ProgressBar({
-        style_class: 'cc-panel-mini-bar',
-        x_expand: false,
-        width: 40,
-        height: 6,
-      })
-      this._weekMiniBar.y_align = Clutter.ActorAlign.CENTER
+      this._weekMiniBar = makeProgressBar({ height: 6, miniBar: true })
       this._weekPctLabel = new St.Label({
         text: '0%',
         style_class: 'cc-panel-label',
         y_align: Clutter.ActorAlign.CENTER,
       })
-      this._panelContent.add_child(this._fivehMiniBar)
+      this._panelContent.add_child(this._fivehMiniBar.track)
       this._panelContent.add_child(this._fivehPctLabel)
-      this._panelContent.add_child(this._weekMiniBar)
+      this._panelContent.add_child(this._weekMiniBar.track)
       this._panelContent.add_child(this._weekPctLabel)
 
       this._errorLabel = new St.Label({
@@ -198,8 +180,8 @@ const Indicator = GObject.registerClass(
 
     _addProgressRow() {
       const item = new PopupMenu.PopupBaseMenuItem({ reactive: false, style_class: 'cc-progress-row' })
-      const bar = new ProgressBar()
-      item.add_child(bar)
+      const bar = makeProgressBar({ height: 8, miniBar: false })
+      item.add_child(bar.track)
       this.menu.addMenuItem(item)
       return bar
     }
@@ -241,6 +223,9 @@ const Indicator = GObject.registerClass(
       }
       for (const id of this._settingsHandlerIds) this._settings.disconnect(id)
       this._settingsHandlerIds = []
+      for (const bar of [this._fivehBar, this._weekBar, this._fivehMiniBar, this._weekMiniBar]) {
+        if (bar && bar.allocId) bar.track.disconnect(bar.allocId)
+      }
     }
 
     _startTimer() {
@@ -428,6 +413,7 @@ const Indicator = GObject.registerClass(
     }
 
     _renderError(msg) {
+      this._lastData = null
       this._panelContent.visible = false
       this._errorLabel.visible = true
       this._errorLabel.set_text('Claude: ⚠')
