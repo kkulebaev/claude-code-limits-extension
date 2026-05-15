@@ -1,26 +1,32 @@
 # Claude Code Limits — GNOME Shell extension
 
-Показывает в верхней панели Fedora/GNOME активность Claude Code:
+Показывает в верхней панели Fedora/GNOME реальные проценты использования Claude
+Code — те же, что выдаёт команда `/usage` внутри интерактивной сессии:
 
-- **5h** — стоимость и токены текущего 5-часового billing-блока, время до сброса, burn rate, прогноз;
-- **7d** — суммарная стоимость и токены за 7 календарных дней.
+- **5h** — текущее 5-часовое окно, процент и время до сброса;
+- **7d** — последние 7 дней (агрегат), процент и время до сброса.
 
-> **Важно.** Это **аппроксимация активности**, посчитанная локально по логам в
-> `~/.claude/projects/` через [`ccusage`](https://www.npmjs.com/package/ccusage).
-> Реальные проценты лимитов Anthropic (5-часовой и недельный) у Claude Code
-> публично не доступны через CLI/API — этот плагин показывает то, что можно
-> вытянуть локально.
+Данные тянутся напрямую с `api.anthropic.com` (приватный OAuth-эндпоинт
+`/api/oauth/usage`) с использованием токена из `~/.claude/.credentials.json`.
+Это значит, что цифры 1:1 совпадают с `/usage` и обновляются вслед за
+изменениями тарифа / лимитов на стороне Anthropic.
+
+## Управление опросом API
+
+- В popup-меню есть переключатель **API requests** и кнопка **Refresh now**.
+- Если выключить переключатель (или снять галку в настройках) — расширение
+  перестаёт стучаться на API, но продолжает показывать последние полученные
+  цифры. Кнопка `Refresh now` остаётся рабочей для разового ручного запроса.
+- Если API вернул ошибку, авто-опрос ставится на паузу: цифры замораживаются,
+  в popup-меню появляется строка статуса с текстом ошибки. Расширение **не**
+  будет ретраить самостоятельно — возобновление произойдёт только при нажатии
+  `Refresh now` (если ответ успешен, таймер снова стартует автоматически).
 
 ## Требования
 
-- GNOME Shell 45+ (тестировалось на 49.6, Fedora 43)
-- Глобально установленный `ccusage` версии **18.0.0 или выше** (плагин использует
-  поле `tokenCounts` из JSON-вывода). Плагин запускает абсолютный путь к бинарнику;
-  on-demand fallback не реализован.
-
-```sh
-pnpm add -g ccusage   # или: npm i -g ccusage / bun add -g ccusage
-```
+- GNOME Shell 45+ (тестировалось на 49.6, Fedora 43).
+- Установленный и залогиненный Claude Code (подписка, не API key) — файл
+  `~/.claude/.credentials.json` должен содержать `claudeAiOauth.accessToken`.
 
 ## Установка
 
@@ -34,17 +40,6 @@ pnpm add -g ccusage   # или: npm i -g ccusage / bun add -g ccusage
 ```sh
 gnome-extensions enable claude-code-limits@kkulebaev
 ```
-
-## Обновление с 0.2.0
-
-Дефолтная метрика в 0.3.0 исключает cache-read токены, которые раньше доминировали в
-счётчике (обычно занимали ~80% от `ccusage totalTokens`). Если у вас была ручная
-подстройка `five-hour-token-limit` или `weekly-token-limit`, числа в баре упадут
-примерно в 5 раз. Варианты:
-
-- перенастроить бюджеты в prefs под новые величины (рекомендуется);
-- включить переключатель **«Count cache reads»** в prefs, чтобы вернуть старое
-  поведение (cache-read токены снова войдут в счёт).
 
 ## Удаление
 
@@ -61,19 +56,28 @@ rm -rf ~/.local/share/gnome-shell/extensions/claude-code-limits@kkulebaev
 journalctl -f -o cat /usr/bin/gnome-shell
 ```
 
-Проверить, какую команду найдёт extension:
+Если в баре висит `Claude: ⚠`:
 
-```sh
-ccusage --version
-```
+- `credentials not readable` — `~/.claude/.credentials.json` не существует или
+  не доступен; запустите `claude` хотя бы раз для входа.
+- `401 Unauthorized` — OAuth-токен просрочен; запустите `claude` — CLI сам
+  обновит токен в credentials-файле, бар подтянется на следующем тике.
+- `HTTP 5xx` — проблема на стороне Anthropic, ретрай по таймеру.
 
 ## Структура
 
 ```
 metadata.json       # манифест extension'а (UUID, поддерживаемые версии shell)
-extension.js        # PanelMenu.Button + Gio.Subprocess к ccusage
+extension.js        # PanelMenu.Button + Soup.Session к /api/oauth/usage
 prefs.js            # окно настроек (Adw.PreferencesPage)
 stylesheet.css      # стили лейбла, popup-строк
 schemas/            # GSettings-схема (org.gnome.shell.extensions.claude-code-limits)
 install.sh          # копирует файлы в ~/.local/share/gnome-shell/extensions
 ```
+
+## Замечание про приватный API
+
+Эндпоинт `/api/oauth/usage` не задокументирован публично — это тот же
+эндпоинт, который дёргает сам Claude Code для своей команды `/usage`.
+Anthropic может изменить его без предупреждения; в этом случае расширение
+покажет соответствующую ошибку, нужен будет апдейт.

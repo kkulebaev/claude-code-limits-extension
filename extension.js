@@ -2,6 +2,7 @@ import GObject from 'gi://GObject'
 import St from 'gi://St'
 import GLib from 'gi://GLib'
 import Gio from 'gi://Gio'
+import Soup from 'gi://Soup'
 import Clutter from 'gi://Clutter'
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js'
@@ -9,36 +10,40 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js'
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js'
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js'
 
-function homePath(rel) {
-  return GLib.build_filenamev([GLib.get_home_dir(), rel])
+const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
+const ANTHROPIC_BETA = 'oauth-2025-04-20'
+const USER_AGENT = 'gnome-claude-code-limits/0.5.0'
+
+function credentialsPath() {
+  return GLib.build_filenamev([GLib.get_home_dir(), '.claude', '.credentials.json'])
 }
-
-const CCUSAGE_CANDIDATES = [
-  () => homePath('.local/share/pnpm/ccusage'),
-  () => homePath('.bun/bin/ccusage'),
-  () => homePath('.npm-global/bin/ccusage'),
-  () => '/usr/local/bin/ccusage',
-  () => '/usr/bin/ccusage',
-]
-
-const NODE_DIR_CANDIDATES = [
-  () => homePath('.local/bin'),
-  () => homePath('.bun/bin'),
-  () => '/usr/local/bin',
-  () => '/usr/bin',
-]
 
 function logError(msg) {
   console.error(`[claude-code-limits] ${msg}`)
 }
 
-function formatTokens(n) {
-  if (n == null || Number.isNaN(n)) return '—'
-  if (n >= 999_500_000_000) return `${(n / 1_000_000_000_000).toFixed(1)}T`
-  if (n >= 999_500_000) return `${(n / 1_000_000_000).toFixed(1)}B`
-  if (n >= 999_500) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(Math.round(n))
+function readAccessToken() {
+  const path = credentialsPath()
+  const file = Gio.File.new_for_path(path)
+  let text
+  try {
+    const [ok, data] = file.load_contents(null)
+    if (!ok) throw new Error('load_contents returned false')
+    text = new TextDecoder().decode(data)
+  } catch (e) {
+    throw new Error(`не удалось прочитать ${path}: ${e.message}. Запустите \`claude\` для входа.`)
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch (e) {
+    throw new Error(`credentials.json не парсится: ${e.message}`)
+  }
+  const token = parsed?.claudeAiOauth?.accessToken
+  if (!token) {
+    throw new Error('claudeAiOauth.accessToken отсутствует — нужен вход через подписку Claude (не API key)')
+  }
+  return token
 }
 
 function pickState(percent, warnPct, dangerPct) {
@@ -47,10 +52,29 @@ function pickState(percent, warnPct, dangerPct) {
   return 'ok'
 }
 
+function formatResets(isoString) {
+  if (!isoString) return '—'
+  const end = GLib.DateTime.new_from_iso8601(isoString, null)?.to_local()
+  if (!end) return '—'
+  const now = GLib.DateTime.new_now_local()
+  const diffSec = Math.max(0, Number(end.difference(now)) / 1_000_000)
+  const sameDay =
+    end.get_year() === now.get_year() &&
+    end.get_month() === now.get_month() &&
+    end.get_day_of_month() === now.get_day_of_month()
+  let when = sameDay ? end.format('%H:%M') : end.format('%a %H:%M')
+  if (diffSec > 0) {
+    const h = Math.floor(diffSec / 3600)
+    const m = Math.floor((diffSec % 3600) / 60)
+    when += h >= 24 ? ` (${Math.floor(h / 24)}d ${h % 24}h)` : ` (${h}h ${m}m)`
+  }
+  return when
+}
+
 function makeProgressBar({ height = 8, miniBar = false } = {}) {
   const trackClass = miniBar ? 'cc-panel-mini-bar-track' : 'cc-progress-track'
   const fillClass = miniBar ? 'cc-panel-mini-bar-fill' : 'cc-progress-fill'
-  const track = new St.BoxLayout({
+  const track = new St.Widget({
     style_class: trackClass,
     x_expand: !miniBar,
     y_align: Clutter.ActorAlign.CENTER,
@@ -59,17 +83,18 @@ function makeProgressBar({ height = 8, miniBar = false } = {}) {
   })
   const fill = new St.Widget({
     style_class: fillClass,
-    x_expand: false,
-    y_expand: false,
     height,
   })
+  fill.set_position(0, 0)
   track.add_child(fill)
 
   let lastPct = 0
   const recompute = () => {
-    const w = track.get_width()
-    if (w <= 0) return
+    const box = track.get_allocation_box()
+    const w = box ? box.get_width() : track.get_width()
+    if (!w || w <= 0) return
     fill.set_width(Math.round((w * lastPct) / 100))
+    fill.set_height(height)
   }
 
   const setProgress = (percent, state) => {
@@ -140,35 +165,51 @@ const Indicator = GObject.registerClass(
 
       this._timeoutId = 0
       this._cancellable = null
-      this._ccusagePath = null
-      this._extraPath = null
       this._lastData = null
+      this._lastError = null
+      this._errorPaused = false
+      this._session = new Soup.Session({ timeout: 15, user_agent: USER_AGENT })
 
       this._settingsHandlerIds = [
         this._settings.connect('changed::refresh-seconds', () => this._restartTimer()),
-        this._settings.connect('changed::five-hour-token-limit', () => this._reRender()),
-        this._settings.connect('changed::weekly-token-limit', () => this._reRender()),
         this._settings.connect('changed::warning-percent', () => this._reRender()),
         this._settings.connect('changed::danger-percent', () => this._reRender()),
-        this._settings.connect('changed::count-cache-reads', () => this._reRender()),
+        this._settings.connect('changed::api-enabled', () => this._onApiEnabledChanged()),
       ]
     }
 
+    _isPollingAllowed() {
+      return this._settings.get_boolean('api-enabled') && !this._errorPaused
+    }
+
     _buildMenu() {
-      this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('5-hour billing block'))
+      this._apiSwitch = new PopupMenu.PopupSwitchMenuItem(
+        'API requests',
+        this._settings.get_boolean('api-enabled'),
+      )
+      this._apiSwitch.connect('toggled', (_item, state) => {
+        if (this._settings.get_boolean('api-enabled') !== state) {
+          this._settings.set_boolean('api-enabled', state)
+        }
+      })
+      this.menu.addMenuItem(this._apiSwitch)
+
+      this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('5-hour window'))
       this._fivehBar = this._addProgressRow()
       this._fivehCaption = this._addCaptionRow()
       this._fivehResets = this._addRow('Resets')
-      this._fivehTokensIn = this._addRow('Input')
-      this._fivehTokensOut = this._addRow('Output')
-      this._fivehTokensCc = this._addRow('Cache create')
-      this._fivehTokensCr = this._addRow('Cache read')
 
       this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Last 7 days'))
       this._weekBar = this._addProgressRow()
       this._weekCaption = this._addCaptionRow()
+      this._weekResets = this._addRow('Resets')
 
       this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem())
+
+      this._statusRow = new PopupMenu.PopupMenuItem('', { reactive: false })
+      this._statusRow.label.add_style_class_name('cc-popup-status')
+      this._statusRow.visible = false
+      this.menu.addMenuItem(this._statusRow)
 
       this._errorRow = new PopupMenu.PopupMenuItem('', { reactive: false })
       this._errorRow.label.add_style_class_name('cc-popup-error')
@@ -217,8 +258,11 @@ const Indicator = GObject.registerClass(
     }
 
     start() {
-      this._refresh()
-      this._startTimer()
+      this._updateStatusRow()
+      if (this._isPollingAllowed()) {
+        this._refresh()
+        this._startTimer()
+      }
     }
 
     stop() {
@@ -227,6 +271,7 @@ const Indicator = GObject.registerClass(
         this._cancellable.cancel()
         this._cancellable = null
       }
+      this._session = null
       for (const id of this._settingsHandlerIds) this._settings.disconnect(id)
       this._settingsHandlerIds = []
       for (const bar of [this._fivehBar, this._weekBar, this._fivehMiniBar, this._weekMiniBar]) {
@@ -251,7 +296,34 @@ const Indicator = GObject.registerClass(
 
     _restartTimer() {
       this._stopTimer()
-      this._startTimer()
+      if (this._isPollingAllowed()) this._startTimer()
+    }
+
+    _onApiEnabledChanged() {
+      const enabled = this._settings.get_boolean('api-enabled')
+      if (this._apiSwitch && this._apiSwitch.state !== enabled) {
+        this._apiSwitch.setToggleState(enabled)
+      }
+      if (enabled) {
+        this._errorPaused = false
+        this._lastError = null
+        this._refresh()
+        if (!this._timeoutId) this._startTimer()
+      } else {
+        this._stopTimer()
+        if (this._cancellable) {
+          this._cancellable.cancel()
+          this._cancellable = null
+        }
+        this._lastError = null
+        this._errorPaused = false
+        if (this._lastData) {
+          this._render(this._lastData)
+        } else {
+          this._renderEmpty()
+        }
+      }
+      this._updateStatusRow()
     }
 
     _refresh() {
@@ -259,185 +331,116 @@ const Indicator = GObject.registerClass(
       if (this._cancellable) this._cancellable.cancel()
       this._cancellable = cancellable
 
-      try {
-        this._resolveCmd()
-      } catch (err) {
-        logError(err.message)
-        this._renderError(err.message)
-        return
-      }
-
-      Promise.all([
-        this._exec([this._ccusagePath, 'blocks', '--active', '--json'], cancellable),
-        this._exec([this._ccusagePath, 'daily', '--since', this._sinceDate(), '--json'], cancellable),
-      ])
-        .then(([blocksOut, dailyOut]) => {
+      this._fetchUsage(cancellable)
+        .then(data => {
           if (cancellable.is_cancelled()) return
-          let parsed
-          try {
-            parsed = {
-              blocks: JSON.parse(blocksOut),
-              daily: JSON.parse(dailyOut),
-            }
-          } catch (e) {
-            logError(e.message)
-            this._renderError(`parse error: ${e.message}`)
-            return
-          }
-          this._lastData = parsed
+          this._lastData = data
+          this._lastError = null
+          const wasErrorPaused = this._errorPaused
+          this._errorPaused = false
           this._reRender()
+          this._updateStatusRow()
+          if (wasErrorPaused && this._settings.get_boolean('api-enabled') && !this._timeoutId) {
+            this._startTimer()
+          }
         })
         .catch(err => {
           if (cancellable.is_cancelled()) return
           if (err instanceof GLib.Error && err.matches(Gio.io_error_quark(), Gio.IOErrorEnum.CANCELLED)) return
           const msg = err?.message ?? String(err)
           logError(msg)
+          this._lastError = msg
+          this._errorPaused = true
+          this._stopTimer()
           this._renderError(msg)
+          this._updateStatusRow()
         })
     }
 
-    _sinceDate() {
-      const dt = GLib.DateTime.new_now_local().add_days(-6)
-      // ccusage --since accepts YYYYMMDD format
-      return dt.format('%Y%m%d')
-    }
-
-    _resolveCmd() {
-      if (!this._ccusagePath) {
-        let found = CCUSAGE_CANDIDATES
-          .map(fn => fn())
-          .find(p => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE))
-        if (!found) {
-          found = GLib.find_program_in_path('ccusage')
-        }
-        if (!found) {
-          throw new Error('ccusage не найден на диске. Установите: pnpm add -g ccusage')
-        }
-        this._ccusagePath = found
-        console.debug(`[claude-code-limits] resolved ccusage: ${this._ccusagePath}`)
-      }
-      if (!this._extraPath) {
-        const dirs = NODE_DIR_CANDIDATES
-          .map(fn => fn())
-          .filter(d => GLib.file_test(d, GLib.FileTest.IS_DIR))
-        const ccusageDir = GLib.path_get_dirname(this._ccusagePath)
-        const set = new Set([ccusageDir, ...dirs])
-        this._extraPath = [...set].join(':')
-      }
-    }
-
-    _exec(argv, cancellable) {
+    _fetchUsage(cancellable) {
       return new Promise((resolve, reject) => {
+        let token
         try {
-          const launcher = new Gio.SubprocessLauncher({
-            flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
-          })
-          launcher.setenv('PATH', this._extraPath, true)
-          launcher.setenv('HOME', GLib.get_home_dir(), true)
-          launcher.setenv('NO_COLOR', '1', true)
-          const proc = launcher.spawnv(argv)
-          proc.communicate_utf8_async(null, cancellable, (p, res) => {
-            try {
-              const [, stdout, stderr] = p.communicate_utf8_finish(res)
-              if (p.get_successful()) {
-                resolve(stdout)
-              } else {
-                const errMsg = (stderr || '').trim() || `command failed: ${argv.join(' ')}`
-                reject(new Error(errMsg))
-              }
-            } catch (e) {
-              reject(e)
-            }
-          })
+          token = readAccessToken()
         } catch (e) {
           reject(e)
+          return
         }
+        const session = this._session
+        if (!session) {
+          reject(new Error('session destroyed'))
+          return
+        }
+        const message = Soup.Message.new('GET', USAGE_URL)
+        message.request_headers.append('Authorization', `Bearer ${token}`)
+        message.request_headers.append('anthropic-beta', ANTHROPIC_BETA)
+        message.request_headers.append('Accept', 'application/json')
+        session.send_and_read_async(message, GLib.PRIORITY_DEFAULT, cancellable, (sess, res) => {
+          try {
+            const bytes = sess.send_and_read_finish(res)
+            const status = message.get_status()
+            const raw = bytes?.get_data()
+            const body = raw ? new TextDecoder().decode(raw) : ''
+            if (status === Soup.Status.UNAUTHORIZED) {
+              reject(new Error('401 Unauthorized — OAuth-токен просрочен, запустите `claude` для обновления'))
+              return
+            }
+            if (status < 200 || status >= 300) {
+              reject(new Error(`HTTP ${status}: ${body.slice(0, 160)}`))
+              return
+            }
+            let parsed
+            try {
+              parsed = JSON.parse(body)
+            } catch (e) {
+              reject(new Error(`parse error: ${e.message}`))
+              return
+            }
+            resolve(parsed)
+          } catch (e) {
+            reject(e)
+          }
+        })
       })
-    }
-
-    _reRender() {
-      if (this._cancellable && this._cancellable.is_cancelled()) return
-      if (!this._lastData) return
-      this._render(this._lastData.blocks, this._lastData.daily)
     }
 
     formatPct(pct) {
       return pct > 100 ? '100%+' : `${Math.round(pct)}%`
     }
-    _blockTokens(block, includeCache) {
-      const tc = block.tokenCounts
-      let n = tc.inputTokens + tc.outputTokens + tc.cacheCreationInputTokens
-      if (includeCache) n += tc.cacheReadInputTokens
-      return n
-    }
-    _dailyTokens(d, includeCache) {
-      let n = d.inputTokens + d.outputTokens + d.cacheCreationTokens
-      if (includeCache) n += d.cacheReadTokens
-      return n
+
+    _reRender() {
+      if (this._cancellable && this._cancellable.is_cancelled()) return
+      if (!this._lastData) return
+      this._render(this._lastData)
     }
 
-    _render(blocksData, dailyData) {
-      this._errorRow.visible = false
-
-      const fivehLimit = Math.max(1, Number(this._settings.get_int64('five-hour-token-limit')))
-      const weeklyLimit = Math.max(1, Number(this._settings.get_int64('weekly-token-limit')))
+    _render(data) {
+      if (!this._lastError) this._errorRow.visible = false
       const warnPct = this._settings.get_uint('warning-percent')
       const dangerPct = this._settings.get_uint('danger-percent')
-      const countCacheReads = this._settings.get_boolean('count-cache-reads')
 
-      const block = blocksData?.blocks?.find(b => b.isActive && !b.isGap) ?? null
-      const fivehTokens = block ? this._blockTokens(block, countCacheReads) : 0
-      const fivehPct = (fivehTokens / fivehLimit) * 100
+      const fiveh = data?.five_hour ?? null
+      const sevd = data?.seven_day ?? null
+      const fivehPct = Number(fiveh?.utilization ?? 0)
+      const sevdPct = Number(sevd?.utilization ?? 0)
       const fivehState = pickState(fivehPct, warnPct, dangerPct)
+      const sevdState = pickState(sevdPct, warnPct, dangerPct)
 
       this._fivehBar.setProgress(fivehPct, fivehState)
-      this._fivehCaption.set_text(
-        `${this.formatPct(fivehPct)} · ${formatTokens(fivehTokens)} / ${formatTokens(fivehLimit)}`,
-      )
+      this._fivehCaption.set_text(`${this.formatPct(fivehPct)} used`)
+      this._fivehResets.set_text(formatResets(fiveh?.resets_at))
 
-      if (block) {
-        const end = GLib.DateTime.new_from_iso8601(block.endTime, null)?.to_local()
-        const now = GLib.DateTime.new_now_local()
-        let resets = end ? end.format('%H:%M') : '—'
-        if (end) {
-          const diffSec = Math.max(0, Number(end.difference(now)) / 1_000_000)
-          if (diffSec > 0) {
-            const h = Math.floor(diffSec / 3600)
-            const m = Math.floor((diffSec % 3600) / 60)
-            resets += ` (${h}h ${m}m)`
-          }
-        }
-        this._fivehResets.set_text(resets)
-        const tc = block.tokenCounts
-        this._fivehTokensIn.set_text(formatTokens(tc.inputTokens))
-        this._fivehTokensOut.set_text(formatTokens(tc.outputTokens))
-        this._fivehTokensCc.set_text(formatTokens(tc.cacheCreationInputTokens))
-        this._fivehTokensCr.set_text(formatTokens(tc.cacheReadInputTokens))
-      } else {
-        this._fivehResets.set_text('—')
-        this._fivehTokensIn.set_text('—')
-        this._fivehTokensOut.set_text('—')
-        this._fivehTokensCc.set_text('—')
-        this._fivehTokensCr.set_text('—')
-      }
-
-      const days = dailyData?.daily ?? []
-      const weeklyTokens = days.reduce((s, d) => s + this._dailyTokens(d, countCacheReads), 0)
-      const weeklyPct = (weeklyTokens / weeklyLimit) * 100
-      const weeklyState = pickState(weeklyPct, warnPct, dangerPct)
-
-      this._weekBar.setProgress(weeklyPct, weeklyState)
-      this._weekCaption.set_text(
-        `${this.formatPct(weeklyPct)} · ${formatTokens(weeklyTokens)} / ${formatTokens(weeklyLimit)}`,
-      )
+      this._weekBar.setProgress(sevdPct, sevdState)
+      this._weekCaption.set_text(`${this.formatPct(sevdPct)} used`)
+      this._weekResets.set_text(formatResets(sevd?.resets_at))
 
       this._panelContent.visible = true
       this._errorLabel.visible = false
 
       this._fivehMiniBar.setProgress(fivehPct, fivehState)
-      this._weekMiniBar.setProgress(weeklyPct, weeklyState)
+      this._weekMiniBar.setProgress(sevdPct, sevdState)
       this._setPctLabel(this._fivehPctLabel, fivehPct, fivehState)
-      this._setPctLabel(this._weekPctLabel, weeklyPct, weeklyState)
+      this._setPctLabel(this._weekPctLabel, sevdPct, sevdState)
     }
 
     _setPctLabel(label, percent, state) {
@@ -449,12 +452,48 @@ const Indicator = GObject.registerClass(
     }
 
     _renderError(msg) {
-      this._lastData = null
-      this._panelContent.visible = false
-      this._errorLabel.visible = true
-      this._errorLabel.set_text('Claude: ⚠')
+      if (this._lastData) {
+        this._render(this._lastData)
+      } else {
+        this._panelContent.visible = false
+        this._errorLabel.visible = true
+        this._errorLabel.set_text('Claude: ⚠')
+      }
       this._errorRow.label.set_text(msg)
       this._errorRow.visible = true
+    }
+
+    _renderEmpty() {
+      this._lastError = null
+      this._errorRow.visible = false
+      this._panelContent.visible = true
+      this._errorLabel.visible = false
+      this._fivehMiniBar.setProgress(0, 'ok')
+      this._weekMiniBar.setProgress(0, 'ok')
+      this._setPctLabel(this._fivehPctLabel, 0, 'ok')
+      this._setPctLabel(this._weekPctLabel, 0, 'ok')
+      this._fivehBar.setProgress(0, 'ok')
+      this._weekBar.setProgress(0, 'ok')
+      this._fivehCaption.set_text('—')
+      this._weekCaption.set_text('—')
+      this._fivehResets.set_text('—')
+      this._weekResets.set_text('—')
+    }
+
+    _updateStatusRow() {
+      if (!this._statusRow) return
+      const enabled = this._settings.get_boolean('api-enabled')
+      if (!enabled) {
+        this._statusRow.label.set_text('Auto-refresh disabled — manual only')
+        this._statusRow.visible = true
+        return
+      }
+      if (this._errorPaused) {
+        this._statusRow.label.set_text('Auto-refresh paused after API error — press Refresh to retry')
+        this._statusRow.visible = true
+        return
+      }
+      this._statusRow.visible = false
     }
   },
 )

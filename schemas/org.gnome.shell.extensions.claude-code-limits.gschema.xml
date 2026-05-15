@@ -2,22 +2,6 @@
 <schemalist>
   <schema id="org.gnome.shell.extensions.claude-code-limits"
           path="/org/gnome/shell/extensions/claude-code-limits/">
-    <key name="five-hour-token-limit" type="x">
-      <default>40000000</default>
-      <summary>5-hour token budget</summary>
-      <description>
-        Maximum tokens for the 5-hour billing block. Tokens = input + output + cache creation,
-        optionally including cache reads (toggle "Count cache reads" in preferences).
-      </description>
-    </key>
-    <key name="weekly-token-limit" type="x">
-      <default>400000000</default>
-      <summary>Weekly token budget</summary>
-      <description>
-        Maximum tokens for the last 7 calendar days. Tokens = input + output + cache creation,
-        optionally including cache reads (toggle "Count cache reads" in preferences).
-      </description>
-    </key>
     <key name="refresh-seconds" type="u">
       <default>60</default>
       <range min="10" max="3600"/>
@@ -35,14 +19,10 @@
       <summary>Danger threshold (%)</summary>
       <description>Progress bar turns red when usage exceeds this percent.</description>
     </key>
-    <key name="count-cache-reads" type="b">
-      <default>false</default>
-      <summary>Count cache-read tokens</summary>
-      <description>
-        If true, cache-read tokens are included in the 5h and weekly budget calculations
-        alongside input, output, and cache-creation tokens. Default off because cache reads
-        typically dominate totalTokens by 5x or more, making default budgets misleading.
-      </description>
+    <key name="api-enabled" type="b">
+      <default>true</default>
+      <summary>Enable automatic API polling</summary>
+      <description>When disabled, the extension keeps the last fetched values and does not contact api.anthropic.com. Use "Refresh now" for a manual one-shot fetch.</description>
     </key>
   </schema>
 </schemalist>

@@ -7,47 +7,33 @@ import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/
 export default class ClaudeCodeLimitsPreferences extends ExtensionPreferences {
   fillPreferencesWindow(window) {
     const settings = this.getSettings()
-    const settingsHandlerIds = []
 
     const page = new Adw.PreferencesPage({ title: 'General', icon_name: 'preferences-system-symbolic' })
     window.add(page)
 
-    const budgets = new Adw.PreferencesGroup({
-      title: 'Token budgets',
+    const polling = new Adw.PreferencesGroup({
+      title: 'Polling',
       description:
-        'Tokens = input + output + cache creation, optionally including cache reads. ' +
-        'These numbers are NOT the same as Anthropic billable tokens — they reflect ' +
-        'overall activity. Pick budgets that match your historical usage.',
+        'При отключённом API-опросе расширение перестаёт стучаться на api.anthropic.com ' +
+        'и продолжает показывать последние полученные значения. Кнопка "Refresh now" в popup-меню ' +
+        'остаётся доступной для разового ручного запроса.',
     })
-    page.add(budgets)
+    page.add(polling)
 
-    const fivehRow = this._buildTokenRow(
-      settings,
-      'five-hour-token-limit',
-      '5-hour limit',
-      'Million tokens (default: 200)',
-    )
-    settingsHandlerIds.push(fivehRow.settingsHandlerId)
-    budgets.add(fivehRow.row)
+    const apiEnabledRow = new Adw.SwitchRow({
+      title: 'Enable API requests',
+      subtitle: 'Auto-polling. Turns off automatically after an API error until you press Refresh.',
+    })
+    settings.bind('api-enabled', apiEnabledRow, 'active', Gio.SettingsBindFlags.DEFAULT)
+    polling.add(apiEnabledRow)
 
-    const weekRow = this._buildTokenRow(
-      settings,
-      'weekly-token-limit',
-      'Weekly limit (last 7 days)',
-      'Million tokens (default: 2000)',
-    )
-    settingsHandlerIds.push(weekRow.settingsHandlerId)
-    budgets.add(weekRow.row)
-
-    const indicators = new Adw.PreferencesGroup({ title: 'Indicators' })
+    const indicators = new Adw.PreferencesGroup({
+      title: 'Indicators',
+      description:
+        'Лимиты приходят с сервера Anthropic (как в /usage внутри Claude Code). ' +
+        'Пороги ниже только окрашивают прогресс-бары.',
+    })
     page.add(indicators)
-
-    const cacheRow = new Adw.SwitchRow({
-      title: 'Count cache reads',
-      subtitle: 'Include cache-read tokens in budget totals. Off by default — cache reads typically dominate totalTokens by ~5x.',
-    })
-    settings.bind('count-cache-reads', cacheRow, 'active', Gio.SettingsBindFlags.DEFAULT)
-    indicators.add(cacheRow)
 
     const warningRow = new Adw.SpinRow({
       title: 'Warning threshold',
@@ -72,36 +58,5 @@ export default class ClaudeCodeLimitsPreferences extends ExtensionPreferences {
     })
     settings.bind('refresh-seconds', refreshRow, 'value', Gio.SettingsBindFlags.DEFAULT)
     indicators.add(refreshRow)
-
-    window.connect('close-request', () => {
-      for (const id of settingsHandlerIds) settings.disconnect(id)
-      settingsHandlerIds.length = 0
-      return false
-    })
-  }
-
-  _buildTokenRow(settings, key, title, subtitle) {
-    const row = new Adw.SpinRow({
-      title,
-      subtitle,
-      adjustment: new Gtk.Adjustment({
-        lower: 1,
-        upper: 1_000_000,
-        step_increment: 10,
-        page_increment: 100,
-      }),
-    })
-    row.value = Math.round(Number(settings.get_int64(key)) / 1_000_000)
-    row.connect('notify::value', () => {
-      const tokens = Math.round(row.value * 1_000_000)
-      if (settings.get_int64(key) !== tokens) {
-        settings.set_int64(key, tokens)
-      }
-    })
-    const settingsHandlerId = settings.connect(`changed::${key}`, () => {
-      const v = Math.round(Number(settings.get_int64(key)) / 1_000_000)
-      if (row.value !== v) row.value = v
-    })
-    return { row, settingsHandlerId }
   }
 }
